@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adoer</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <style>
+    body {
+      margin: 0;
+      background: #f8f9fb;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      padding: 1rem;
+      background: #ffffff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      display: flex;
+      align-items: center;
+    }
+
+    .logo {
+      height: 28px;
+      width: auto;
+      margin-right: 0.6rem;
+    }
+
+    .brand {
+      font-weight: bold;
+      font-size: 1.3rem;
+      color: #111;
+    }
+
+    #chat-window {
+      flex: 1;
+      padding: 1rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .message {
+      max-width: 70%;
+      padding: 0.75rem 1rem;
+      border-radius: 1rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    .user {
+      align-self: flex-end;
+      background: #3b82f6;
+      color: white;
+      padding: 0.75rem 1rem;
+      border-radius: 1rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      max-width: 70%;
+    }
+
+    .bot {
+      align-self: flex-start;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      color: #111;
+    }
+
+    #input-area {
+      display: flex;
+      padding: 1rem;
+      background: #ffffff;
+      border-top: 1px solid #ddd;
+    }
+
+    #input-area input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border: 1px solid #ccc;
+      border-radius: 1rem;
+      outline: none;
+      font-size: 1rem;
+    }
+
+    #input-area button {
+      margin-left: 0.5rem;
+      padding: 0.75rem 1.2rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 1rem;
+      background: #4f46e5;
+      color: white;
+      cursor: pointer;
+    }
+
+    #input-area button:hover {
+      background: #4338ca;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <img src="/static/logo.png" alt="Adoer Logo" class="logo" />
+    <span class="brand">Adoer</span>
+  </header>
+
+  <main id="chat-window"></main>
+
+  <div id="input-area">
+    <input type="text" id="user-input" placeholder="Type a message..." />
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <script>
+    const chatWindow = document.getElementById('chat-window');
+    const input = document.getElementById('user-input');
+
+    input.addEventListener('keypress', function (e) {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    function addMessage(text, type) {
+      const div = document.createElement('div');
+      div.className = `message ${type}`;
+      div.textContent = text;
+      chatWindow.appendChild(div);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      addMessage(`You: ${text}`, 'user');
+      input.value = '';
+
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text })
+      });
+
+      const data = await res.json();
+      addMessage(`Bot: ${data.response}`, 'bot');
+    }
+  </script>
+
+</body>
+</html>
