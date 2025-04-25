@@ -30,9 +30,10 @@ class Note(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# ✅ OpenRouter-powered LLM
 llm = ChatOpenAI(
     temperature=0.7,
-    model_name="gpt-3.5-turbo",  
+    model_name="openrouter/openai/gpt-3.5-turbo",  # Or try: mistralai/mistral-7b-instruct
     openai_api_base="https://openrouter.ai/api/v1",
     openai_api_key=os.getenv("OPENROUTER_API_KEY")
 )
@@ -43,7 +44,6 @@ conversation = ConversationChain(llm=llm, memory=memory, verbose=False)
 class Message(BaseModel):
     message: str
 
-# basic memory to simulate state (can be replaced with Redis or DB later)
 last_action = {"type": None, "data": None}
 
 @app.post("/chat")
@@ -52,7 +52,6 @@ async def chat(msg: Message):
     user_input = msg.message.strip()
     lowered = user_input.lower()
 
-    # --- SMART FOLLOW-UP HANDLING ---
     followup_due_date_keywords = ["due", "remind", "tomorrow", "evening", "tonight", "in 2 days", "next week", "deadline", "at ", "on ", "set it for", "schedule"]
     if last_action["type"] == "awaiting_due_date":
         if any(kw in lowered for kw in followup_due_date_keywords):
@@ -60,7 +59,6 @@ async def chat(msg: Message):
             last_action["type"] = None
             return {"response": f"📅 Got it. I’ll mark “{task_text}” with that due date in mind. ✅ What’s next?"}
         else:
-            # ask again to clarify
             return {"response": "⏰ Could you let me know what time or day you want this task set for?"}
 
     if lowered in ["yes", "sure", "go ahead", "add one", "okay", "ok"]:
@@ -70,7 +68,6 @@ async def chat(msg: Message):
         else:
             return {"response": "Got it! What’s next?"}
 
-    # --- COMMANDS ---
     if lowered.startswith("/task"):
         content = user_input[5:].strip()
         if not content:
@@ -119,7 +116,6 @@ async def chat(msg: Message):
             "• or just say what’s on your mind"
         )}
 
-    # --- NATURAL LANGUAGE TASKS ---
     if "remind me" in lowered or "to-do" in lowered:
         content = re.sub(r"(remind me|to-do|add a task)", "", user_input, flags=re.IGNORECASE).strip()
         if content:
@@ -140,13 +136,10 @@ async def chat(msg: Message):
         else:
             return {"response": "Sure! What should I remember?"}
 
-    # --- LLM BACKUP (only when no other intent matched) ---
     ai_reply = conversation.run(user_input)
     return {"response": ai_reply}
 
-
-
-# Static frontend
+# Serve frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
