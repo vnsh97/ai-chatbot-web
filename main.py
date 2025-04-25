@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from langchain.chat_models import ChatOpenAI
@@ -10,6 +10,8 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
 import os
 import re
+import dateparser
+from datetime import datetime
 
 app = FastAPI()
 
@@ -22,6 +24,7 @@ class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True, index=True)
     content = Column(String, index=True)
+    due_date = Column(DateTime, nullable=True)
 
 class Note(Base):
     __tablename__ = "notes"
@@ -30,10 +33,9 @@ class Note(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# ✅ OpenRouter-powered LLM
 llm = ChatOpenAI(
     temperature=0.7,
-    model_name="openrouter/openai/gpt-3.5-turbo",  # Or try: mistralai/mistral-7b-instruct
+    model_name="gpt-3.5-turbo",  
     openai_api_base="https://openrouter.ai/api/v1",
     openai_api_key=os.getenv("OPENROUTER_API_KEY")
 )
@@ -52,14 +54,18 @@ async def chat(msg: Message):
     user_input = msg.message.strip()
     lowered = user_input.lower()
 
-    followup_due_date_keywords = ["due", "remind", "tomorrow", "evening", "tonight", "in 2 days", "next week", "deadline", "at ", "on ", "set it for", "schedule"]
     if last_action["type"] == "awaiting_due_date":
-        if any(kw in lowered for kw in followup_due_date_keywords):
-            task_text = last_action["data"]
+        parsed_time = dateparser.parse(user_input)
+        task_text = last_action["data"]
+        if parsed_time:
+            task = session.query(Task).filter_by(content=task_text).order_by(Task.id.desc()).first()
+            if task:
+                task.due_date = parsed_time
+                session.commit()
             last_action["type"] = None
-            return {"response": f"📅 Got it. I’ll mark “{task_text}” with that due date in mind. ✅ What’s next?"}
+            return {"response": f"📅 Task ‘{task_text}’ set for {parsed_time.strftime('%A, %I:%M %p')}. ✅ Anything else?"}
         else:
-            return {"response": "⏰ Could you let me know what time or day you want this task set for?"}
+            return {"response": "⏰ I couldn’t understand that time. Can you say it like ‘tomorrow at 4pm’ or ‘in 2 hours’?"}
 
     if lowered in ["yes", "sure", "go ahead", "add one", "okay", "ok"]:
         if last_action["type"] == "asked_due_date":
@@ -72,7 +78,8 @@ async def chat(msg: Message):
         content = user_input[5:].strip()
         if not content:
             return {"response": "🔖 What task should I add?"}
-        session.add(Task(content=content))
+        task = Task(content=content)
+        session.add(task)
         session.commit()
         last_action["type"] = "asked_due_date"
         last_action["data"] = content
@@ -87,21 +94,29 @@ async def chat(msg: Message):
         return {"response": f"📒 Noted: “{content}.” Want to tag or organize it further?"}
 
     elif lowered.startswith("/show tasks"):
-        tasks = session.query(Task).all()
+        tasks = session.query(Task).order_by(Task.due_date.asc().nulls_last()).all()
         if not tasks:
-            return {"response": "🤷‍♂️ No tasks saved yet. Want to add one now?"}
-        return {"response": "🗂️ Your tasks:\n" + "\n".join([f"• {t.content}" for t in tasks])}
+            return {"response": "🧖‍♂️ No tasks saved yet. Want to add one now?"}
+        return {"response": "📂 Your tasks:\n" + "\n".join([
+            f"• {t.content} ({t.due_date.strftime('%b %d %I:%M %p') if t.due_date else 'No due date'})" for t in tasks])}
+
+    elif lowered.startswith("/show calendar"):
+        tasks = session.query(Task).order_by(Task.due_date.asc().nulls_last()).all()
+        if not tasks:
+            return {"response": "📭 Nothing to show on your calendar yet."}
+        return {"response": "🗓️ Calendar View:\n" + "\n".join([
+            f"📌 {t.content} — {t.due_date.strftime('%a, %d %b %I:%M %p') if t.due_date else '❓ No due date'}" for t in tasks])}
 
     elif lowered.startswith("/show notes"):
         notes = session.query(Note).all()
         if not notes:
-            return {"response": "📭 No notes found. You can try `/notes your note here`."}
-        return {"response": "🧾 Here’s what you’ve noted:\n" + "\n".join([f"📝 {n.content}" for n in notes])}
+            return {"response": "📬 No notes found. You can try `/notes your note here`."}
+        return {"response": "📟 Here’s what you’ve noted:\n" + "\n".join([f"📝 {n.content}" for n in notes])}
 
     elif lowered.startswith("/summarize"):
         notes = session.query(Note).all()
         if not notes:
-            return {"response": "🫥 No notes yet — nothing to summarize."}
+            return {"response": "🪥 No notes yet — nothing to summarize."}
         all_notes = "\n".join([n.content for n in notes])
         summary = conversation.run(f"Summarize these notes casually:\n{all_notes}")
         return {"response": summary}
@@ -112,6 +127,7 @@ async def chat(msg: Message):
             "• `/task read a chapter` → add task\n"
             "• `/notes project ideas` → save a note\n"
             "• `/show tasks` → list tasks\n"
+            "• `/show calendar` → date-aware view of tasks\n"
             "• `/summarize` → quick summary of notes\n"
             "• or just say what’s on your mind"
         )}
@@ -139,7 +155,6 @@ async def chat(msg: Message):
     ai_reply = conversation.run(user_input)
     return {"response": ai_reply}
 
-# Serve frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
